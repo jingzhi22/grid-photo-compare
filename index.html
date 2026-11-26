@@ -8,10 +8,11 @@
 <style>
   :root { --h: 110px; --gap: 8px; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { background: #000; color: #ddd; min-height: 100%; font: 14px system-ui, sans-serif; overscroll-behavior: none; }
+  html, body { background: #000; color: #ddd; height: 100%; font: 14px system-ui, sans-serif; overscroll-behavior: none; }
+  body { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
 
   header {
-    position: sticky; top: 0; z-index: 10; background: #000;
+    flex: none;
     display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 12px;
   }
   button, .size {
@@ -23,18 +24,24 @@
   .size { display: flex; gap: 8px; align-items: center; }
   input[type=range] { width: 110px; accent-color: #ddd; }
 
+  /* The board scrolls both ways, so long rows never wrap */
+  #board { flex: 1; overflow: auto; overscroll-behavior: none; }
   .row {
-    display: flex; flex-wrap: wrap; align-items: flex-start; align-content: flex-start;
-    gap: var(--gap); padding: 12px; min-height: calc(var(--h) + 24px);
+    display: flex; gap: 16px; padding: 12px; width: max-content; min-width: 100%;
     border-top: 1px solid #333;
   }
-  .row.new {
-    min-height: 96px; margin: 12px; border: 1px dashed #333; border-radius: 6px;
+  .col { display: flex; flex: none; align-items: flex-start; gap: var(--gap); min-height: var(--h); }
+  .col + .col:not(.new) { border-left: 2px solid #555; padding-left: 16px; }
+  .col.new {
+    align-items: center; justify-content: center; align-self: stretch; min-width: 56px;
+    border: 1px dashed #333; border-radius: 6px; color: #666;
   }
-  .row.new:empty { align-content: center; }
-  .row.new:empty::before { content: "Drag a photo here to start a new row"; margin: 0 auto; color: #666; }
+  .col.new:empty::before { content: "+"; font-size: 22px; }
+  .row.new { position: sticky; left: 0; width: 100%; min-width: 0; border-top: 0; }
+  .row.new .col.new { flex: 1; min-height: 72px; }
+  .row.new .col.new:empty::before { content: "Drag a photo here to start a new row"; font-size: 14px; }
   .tile {
-    flex: none; width: calc(var(--h) * var(--ratio, 1)); max-width: 100%; cursor: grab; transition: opacity .15s;
+    flex: none; width: calc(var(--h) * var(--ratio, 1)); cursor: grab; transition: opacity .15s;
     user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
     -webkit-tap-highlight-color: transparent;
   }
@@ -66,15 +73,23 @@ const empty = document.getElementById('empty');
 const fileInput = document.getElementById('file');
 const sizeInput = document.getElementById('size');
 
-// ---------- Rows and photos ----------
+// ---------- Rows, columns and photos ----------
 // Photos live only in memory: refreshing or closing the page clears them.
 function addRow() {
   const row = document.createElement('div');
   row.className = 'row';
   board.append(row);
+  return row;
+}
+
+// A column is a group of photos within one row; it is only as wide as its photos
+function addColumn(row) {
+  const col = document.createElement('div');
+  col.className = 'col';
+  row.append(col);
   if (window.Sortable) {
-    Sortable.create(row, {
-      group: 'photos',         // lets photos move between rows
+    Sortable.create(col, {
+      group: 'photos',         // lets photos move between columns and rows
       animation: 180,
       ghostClass: 'ghost',
       delay: 200,              // touch: press and hold to drag, swipe to scroll
@@ -84,28 +99,48 @@ function addRow() {
       fallbackOnBody: true,
       fallbackTolerance: 5,
       emptyInsertThreshold: 20,
+      scrollSensitivity: 60,   // auto-scroll when dragging near an edge
       onEnd: () => setTimeout(tidy),
     });
   }
-  return row;
+  return col;
+}
+
+function removeColumn(col) {
+  window.Sortable?.get(col)?.destroy();
+  col.remove();
 }
 
 function removeRow(row) {
-  window.Sortable?.get(row)?.destroy();
+  [...row.children].forEach(removeColumn);
   row.remove();
 }
 
-// Remove emptied rows and keep exactly one "new row" drop zone at the bottom
+// Remove emptied columns and rows, then re-add the "new column" and "new row" drop zones
 function tidy() {
+  const { scrollLeft, scrollTop } = board;
   for (const row of [...board.children]) {
-    if (!row.children.length) removeRow(row);
-    else row.classList.remove('new');
+    for (const col of [...row.children]) {
+      if (!col.children.length) removeColumn(col);
+      else col.classList.remove('new');
+    }
+    if (!row.children.length) {
+      row.remove();
+    } else {
+      row.classList.remove('new');
+      addColumn(row).classList.add('new');
+    }
   }
-  if (board.children.length) addRow().classList.add('new');
+  if (board.children.length) {
+    const row = addRow();
+    row.classList.add('new');
+    addColumn(row).classList.add('new');
+  }
   empty.hidden = board.children.length > 0;
+  board.scrollTo(scrollLeft, scrollTop);
 }
 
-function addTile(file, row) {
+function addTile(file, col) {
   const tile = document.createElement('div');
   tile.className = 'tile';
   tile.tabIndex = 0;
@@ -126,15 +161,15 @@ function addTile(file, row) {
   };
 
   tile.append(img);
-  row.append(tile);
+  col.append(tile);
 }
 
 // Each batch of added photos starts as its own row
 function addFiles(files) {
   const images = [...files].filter(file => file.type.startsWith('image/'));
   if (!images.length) return;
-  const row = addRow();
-  images.forEach(file => addTile(file, row));
+  const col = addColumn(addRow());
+  images.forEach(file => addTile(file, col));
   tidy();
 }
 
