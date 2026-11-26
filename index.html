@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Photo Grid</title>
+<style>
+  :root { --tile: 110px; --gap: 8px; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: #000; color: #ddd; min-height: 100%; font: 14px system-ui, sans-serif; overscroll-behavior: none; }
+
+  header {
+    position: sticky; top: 0; z-index: 10; background: #000;
+    display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 12px;
+  }
+  button, .size {
+    background: #161616; color: #ddd; border: 1px solid #333; border-radius: 6px;
+    padding: 8px 14px; font: inherit;
+  }
+  button { cursor: pointer; }
+  button:hover { background: #262626; }
+  .size { display: flex; gap: 8px; align-items: center; }
+  input[type=range] { width: 110px; accent-color: #ddd; }
+
+  #grid {
+    display: grid; gap: var(--gap); padding: 12px;
+    grid-template-columns: repeat(auto-fill, minmax(min(var(--tile), 100%), 1fr));
+  }
+  .tile {
+    aspect-ratio: 1; cursor: grab; overflow: hidden; transition: opacity .15s;
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .tile img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+  .tile.dimmed { opacity: .5; }
+  .tile:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+  .ghost { visibility: hidden; }
+
+  #empty { position: fixed; inset: 0; display: grid; place-items: center; color: #666; pointer-events: none; text-align: center; padding: 24px; }
+  [hidden] { display: none !important; }
+  body.dropping { outline: 2px dashed #777; outline-offset: -6px; }
+</style>
+</head>
+<body>
+<header>
+  <button id="add">Add photos</button>
+  <button id="clear">Clear all</button>
+  <label class="size">Size <input id="size" type="range" min="80" max="420" value="110"></label>
+  <input id="file" type="file" accept="image/*" multiple hidden>
+</header>
+
+<main id="grid"></main>
+<div id="empty">Tap “Add photos” to begin</div>
+
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
+<script>
+const grid = document.getElementById('grid');
+const empty = document.getElementById('empty');
+const fileInput = document.getElementById('file');
+const sizeInput = document.getElementById('size');
+
+// ---------- Grid ----------
+// Photos live only in memory: refreshing or closing the page clears them.
+function addTile(file) {
+  const tile = document.createElement('div');
+  tile.className = 'tile';
+  tile.tabIndex = 0;
+  tile.setAttribute('role', 'button');
+  tile.setAttribute('aria-pressed', 'false');
+
+  const img = document.createElement('img');
+  img.src = URL.createObjectURL(file);
+  img.alt = file.name || 'Photo';
+  img.draggable = false;
+  // Drop files the browser cannot display
+  img.onerror = () => {
+    URL.revokeObjectURL(img.src);
+    tile.remove();
+    refresh();
+  };
+
+  tile.append(img);
+  grid.append(tile);
+}
+
+function refresh() {
+  empty.hidden = grid.children.length > 0;
+}
+
+function addFiles(files) {
+  for (const file of files) {
+    if (file.type.startsWith('image/')) addTile(file);
+  }
+  refresh();
+}
+
+function toggle(tile) {
+  tile.setAttribute('aria-pressed', tile.classList.toggle('dimmed'));
+}
+
+// ---------- Events ----------
+grid.addEventListener('click', e => {
+  const tile = e.target.closest('.tile');
+  if (tile) toggle(tile);
+});
+
+grid.addEventListener('keydown', e => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.tile')) {
+    e.preventDefault();
+    toggle(e.target);
+  }
+});
+
+document.getElementById('add').onclick = () => fileInput.click();
+fileInput.onchange = () => { addFiles(fileInput.files); fileInput.value = ''; };
+
+document.getElementById('clear').onclick = () => {
+  if (!grid.children.length || !confirm('Remove all photos from this grid?')) return;
+  grid.querySelectorAll('img').forEach(img => URL.revokeObjectURL(img.src));
+  grid.replaceChildren();
+  refresh();
+};
+
+function setSize(px) { document.documentElement.style.setProperty('--tile', px + 'px'); }
+sizeInput.oninput = () => setSize(sizeInput.value);
+// Start with about 3 columns on a phone, larger tiles on a computer
+sizeInput.value = innerWidth < 600 ? Math.floor((innerWidth - 40) / 3) : 180;
+setSize(sizeInput.value);
+
+// Drag files in from the desktop (ignored while reordering tiles)
+const isFileDrag = e => !(window.Sortable && Sortable.active) && e.dataTransfer.types.includes('Files');
+document.addEventListener('dragover', e => {
+  if (!isFileDrag(e)) return;
+  e.preventDefault();
+  document.body.classList.add('dropping');
+});
+document.addEventListener('dragleave', e => {
+  if (!e.relatedTarget) document.body.classList.remove('dropping');
+});
+document.addEventListener('drop', e => {
+  document.body.classList.remove('dropping');
+  if (!isFileDrag(e)) return;
+  e.preventDefault();
+  addFiles(e.dataTransfer.files);
+});
+
+// ---------- Drag to reorder (mouse and touch) ----------
+if (window.Sortable) {
+  Sortable.create(grid, {
+    animation: 180,
+    ghostClass: 'ghost',
+    delay: 200,              // touch: press and hold to drag, swipe to scroll
+    delayOnTouchOnly: true,
+    touchStartThreshold: 5,
+  });
+} else {
+  alert('The drag-and-drop library did not load. Check your connection and refresh.');
+}
+</script>
+</body>
+</html>
